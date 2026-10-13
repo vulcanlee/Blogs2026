@@ -12,6 +12,8 @@
 
 這篇文章將會進一步介紹如何透過串流輸出回應的方式，來即時接收 AI 代理生成的內容。
 
+[專案原始碼](https://github.com/vulcanlee/CSharp2026/tree/main/csStreamAgent)
+
 # 建立 Console 專案
 * 開啟 Visual Studio 2026
 * 選擇「建立新專案」
