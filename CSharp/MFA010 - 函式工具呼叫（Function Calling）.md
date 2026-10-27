@@ -1,0 +1,312 @@
+# MFA010 - 函式工具呼叫（Function Calling））
+
+在上一篇關於 Microsoft Agent Framework 系列教學文章 "MFAMFA009 - 結構化輸出（JSON）" 中，我們學會了如何讓 AI 代理生成結構化的 JSON 購物清單，並確保每個食材的分類與份量正確。這樣我們就不再需要去關注生成出來的那些非結構的文字內容，可以直接面對結構化的 Json 物件。
+
+![](../Images/mvp9986.png)
+
+在完成這篇文章的練習，
+
+接下來看看如何做到這樣的效果。
+
+# 建立 Console 專案
+* 開啟 Visual Studio 2026
+* 選擇「建立新專案」
+* 在 [建立新的專案] 視窗中，在右方清單內，找到並選擇「主控台應用程式」 項目
+* 然後點擊右下方「下一步」按鈕
+* 此時將會看到 [設定新的專案] 對話窗
+* 在該對話窗的 [專案名稱] 欄位中，輸入專案名稱，例如 "csFunctionCallingAgent"
+* 然後點擊右下方「下一步」按鈕
+* 接著會看到 [其他資訊] 對話窗
+* 在這個對話窗內，確認使用底下的選項
+    * 架構：.NET 10.0 (或更新版本)
+    * 勾選 不要使用最上層陳述式 (這是我的個人習慣)
+* 然後點擊右下方「建立」按鈕
+* 現在，已經完成了這個 Console 主控台 專案的建立
+
+## 安裝需要用到的 NuGet 套件
+
+要完成這個第一次接觸 Microsoft Agent Framework 練習專案，需要安裝以下幾個 NuGet 套件：
+
+### Microsoft.Extensions.AI
+
+這個套件將會為生成式 AI 定義的一層「統一抽象介面 + Middleware 管線」，讓開發者可以更方便地整合不同的生成式 AI 模型，並且在應用程式中使用一致的方式進行呼叫與管理。
+
+* 滑鼠右擊 [csFunctionCallingAgent] 專案節點
+* 點選彈出功能表的 [管理 NuGet 套件] 項
+* 在 [瀏覽] 索引標籤中，搜尋並且安裝底下的 NuGet 套件
+    * Microsoft.Extensions.AI
+    
+### Microsoft.Extensions.AI.OpenAI
+
+這個套件是微軟官方為 .NET 整合 AI 服務所提供的擴充套件。它實現了 IChatClient 與 IEmbeddingGenerator 核心抽象介面，讓開發人員能以一致的程式碼，輕鬆串接 OpenAI 或相容的 API 端點（例如 Azure OpenAI、GitHub Models 等）。
+
+* 滑鼠右擊 [csFunctionCallingAgent] 專案節點
+* 點選彈出功能表的 [管理 NuGet 套件] 項
+* 在 [瀏覽] 索引標籤中，搜尋並且安裝底下的 NuGet 套件
+    * Microsoft.Extensions.AI.OpenAI
+    
+### Microsoft.Agents.AI
+
+這個套件是微軟官方推出 Microsoft Agent Framework（微軟智慧代理框架）的核心 .NET 套件。它主要用於在 .NET 環境中建構、協調與部署 AI 代理（AI Agents） 及多代理工作流（Multi-agent workflows），是用來取代舊版 AutoGen 的企業級解決方案。
+
+* 滑鼠右擊 [csFunctionCallingAgent] 專案節點
+* 點選彈出功能表的 [管理 NuGet 套件] 項
+* 在 [瀏覽] 索引標籤中，搜尋並且安裝底下的 NuGet 套件
+    * Microsoft.Agents.AI
+     
+### OpenAI
+
+這個套件為官方的 OpenAI .NET 客戶端類別庫，是 OpenAI NuGet 套件。此套件由 OpenAI 與 Microsoft 合作開發，提供直接存取 OpenAI 官方 REST API 的便利管道。
+
+* 滑鼠右擊 [csFunctionCallingAgent] 專案節點
+* 點選彈出功能表的 [管理 NuGet 套件] 項
+* 在 [瀏覽] 索引標籤中，搜尋並且安裝底下的 NuGet 套件
+    * OpenAI
+
+# 宣告 API 端點與 Key 環境變數
+
+關於這個小節的內容，將會在這個系列每篇文章中都會用到，因此，可以參考 [MFA001 Microsoft Agent Framework 初次體驗開發出 AI 代理](https://csharpkh.blogspot.com/2026/10/mfa001-microsoft-agent-framework-ai.html) 文章中的 [宣告 API 端點與 Key 環境變數] 說明內容，若這裡提到的環境變數已經建立好了，則可以跳過這個小節內容。
+
+# 修改 Program.cs 程式碼
+
+為了要完成這個需求 : 如何用 Azure OpenAI 的 gpt-5.6-luna 聊天模型建立一個簡單 AI 代理，並產生一篇與鵝有關的詩。
+因此，我們需要修改 Program.cs 程式碼，這時需要完成底下的操作。
+
+* 在專案內，找到並且開啟 [Program.cs] 檔案
+* 使用底下程式碼內容來取代 [Program.cs] 檔案的內容
+
+```csharp
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using OpenAI;
+using OpenAI.Chat;
+using System.ClientModel;
+using System.ComponentModel;
+using System.Text;
+using System.Text.Json.Nodes;
+
+namespace csFunctionCallingAgent;
+
+internal class Program
+{
+    private static readonly HttpClient Http = new();
+    private static int _toolCallCount;
+
+    static async Task Main(string[] args)
+    {
+        Console.OutputEncoding = Encoding.UTF8;
+
+        var apiKey = Environment.GetEnvironmentVariable("AzureOpenAI_Key");
+        var endpoint = Environment.GetEnvironmentVariable("AzureOpenAI_Endpoint");
+        var model = "gpt-5.6-luna";
+
+        if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(endpoint))
+        {
+            Console.WriteLine("請先設定環境變數 AzureOpenAI_Key 與 AzureOpenAI_Endpoint 後再執行。");
+            return;
+        }
+
+        IChatClient chatClient =
+            new ChatClient(
+                    model,
+                    new ApiKeyCredential(apiKey),
+                    new OpenAIClientOptions { Endpoint = new Uri(endpoint) })
+                .AsIChatClient();
+
+        AIAgent agent = new ChatClientAgent(
+            chatClient,
+            "你是穿搭顧問，用繁體中文精簡回答。需要天氣資訊時請使用工具查詢，不要自己猜測天氣。", // 系統提示詞
+            "穿搭顧問", // 代理名稱
+            null, // 代理描述
+            [AIFunctionFactory.Create(GetWeatherForecast)]); // 交給代理的工具，要不要呼叫由模型決定
+
+        string[] questions =
+        [
+            "我明天要去台北上班，該穿什麼？",
+            "白色襯衫搭什麼顏色的褲子好看？",
+            "我明天早上在台北、晚上到高雄，要帶哪些衣服？",
+        ];
+
+        Console.WriteLine($"使用的模型：{model}");
+
+        foreach (var question in questions)
+        {
+            _toolCallCount = 0;
+            Console.WriteLine();
+            Console.WriteLine($"❓ {question}");
+
+            var response = await agent.RunAsync(question);
+
+            Console.WriteLine(response.Text);
+            Console.WriteLine($"（本題呼叫工具 {_toolCallCount} 次）");
+        }
+    }
+
+    [Description("查詢指定城市在今天起第幾天的天氣預報")]
+    private static async Task<string> GetWeatherForecast(
+        [Description("城市的英文名稱，例如 Taipei、Kaohsiung")] string city,
+        [Description("從今天起算第幾天：0=今天，1=明天，最多 6")] int daysFromToday)
+    {
+        _toolCallCount++;
+        Console.WriteLine($"🔧 呼叫 GetWeatherForecast(city: {city}, daysFromToday: {daysFromToday})");
+
+        daysFromToday = Math.Clamp(daysFromToday, 0, 6);
+
+        // 1. 城市名稱 → 經緯度
+        var geo = JsonNode.Parse(await Http.GetStringAsync(
+            $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(city)}&count=1&language=zh"));
+        var place = geo?["results"]?[0];
+        if (place is null)
+        {
+            return $"找不到城市 {city}";
+        }
+
+        // 2. 經緯度 → 每日天氣預報
+        var forecast = JsonNode.Parse(await Http.GetStringAsync(
+            $"https://api.open-meteo.com/v1/forecast?latitude={place["latitude"]}&longitude={place["longitude"]}" +
+            $"&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+            $"&timezone=auto&forecast_days={daysFromToday + 1}"));
+        var daily = forecast!["daily"]!;
+        var i = daysFromToday;
+
+        return $"{place["name"]} {daily["time"]![i]}：{WeatherText((int)daily["weather_code"]![i]!)}，" +
+               $"氣溫 {daily["temperature_2m_min"]![i]}~{daily["temperature_2m_max"]![i]}°C，" +
+               $"降雨機率 {daily["precipitation_probability_max"]![i]}%";
+    }
+
+    // WMO 天氣代碼 → 中文
+    private static string WeatherText(int code) => code switch
+    {
+        0 => "晴",
+        1 or 2 => "多雲",
+        3 => "陰",
+        45 or 48 => "霧",
+        >= 51 and <= 57 => "毛毛雨",
+        >= 61 and <= 67 => "雨",
+        >= 71 and <= 77 => "雪",
+        >= 80 and <= 82 => "陣雨",
+        85 or 86 => "陣雪",
+        >= 95 and <= 99 => "雷雨",
+        _ => "未知",
+    };
+}
+
+```
+
+這個程式一開始將會讀取 API Key 與服務端點的數據，接著如同前面的範例相同，先建立一個 IChatClient 物件。接者建立 AIAgent 物件，這裡將會指定系統提示詞為 "你是穿搭顧問，用繁體中文精簡回答。需要天氣資訊時請使用工具查詢，不要自己猜測天氣" 其中，最後一句話，會讓代理人物件，嘗試到這個系統內，找到合適的工具來取得天氣資訊，而不是自行猜測。
+
+從這個系統提示詞可以看出，這並不是僅僅想要讓 AI Agent 來使用工具來回答內容，而是想要透過工具來取得正確的天氣資訊，並且使用這些天氣預報資訊，讓 AI 模型產生出需要穿搭的建議。這樣的設計可以確保 AI 代理在提供穿搭建議時，所依據的天氣資訊是準確的，而不是憑空猜測，提升了建議的可靠性與實用性。
+
+當在建立這個 AI Agent 的時候，有將 `[AIFunctionFactory.Create(GetWeatherForecast)]` 傳送給 ChatClientAgent 建構函式內，這個參數為讓 AI Agent 知道與註冊一個可用的工具函式，讓 AI 在需要天氣資訊時，可以呼叫這個工具來取得正確的天氣資料。
+
+這樣的設計讓 AI Agent 能夠在對話過程中，根據使用者的需求，動態地呼叫工具函式來取得最新的天氣資訊，並將這些資訊整合到回應中，提供更精準且實用的建議。
+
+AIFunctionFactory.Create 這個方法宣告在 Microsoft.Extensions.AI 命名空間中，用來建立可供 AI Agent 呼叫的工具函式。而傳入的引述為 GetWeatherForecast 這個方法，該方法的程式碼如下：
+
+```csharp
+[Description("查詢指定城市在今天起第幾天的天氣預報")]
+private static async Task<string> GetWeatherForecast(
+    [Description("城市的英文名稱，例如 Taipei、Kaohsiung")] string city,
+    [Description("從今天起算第幾天：0=今天，1=明天，最多 6")] int daysFromToday)
+{
+    _toolCallCount++;
+    Console.WriteLine($"🔧 呼叫 GetWeatherForecast(city: {city}, daysFromToday: {daysFromToday})");
+
+    daysFromToday = Math.Clamp(daysFromToday, 0, 6);
+
+    // 1. 城市名稱 → 經緯度
+    var geo = JsonNode.Parse(await Http.GetStringAsync(
+        $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(city)}&count=1&language=zh"));
+    var place = geo?["results"]?[0];
+    if (place is null)
+    {
+        return $"找不到城市 {city}";
+    }
+
+    // 2. 經緯度 → 每日天氣預報
+    var forecast = JsonNode.Parse(await Http.GetStringAsync(
+        $"https://api.open-meteo.com/v1/forecast?latitude={place["latitude"]}&longitude={place["longitude"]}" +
+        $"&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+        $"&timezone=auto&forecast_days={daysFromToday + 1}"));
+    var daily = forecast!["daily"]!;
+    var i = daysFromToday;
+
+    return $"{place["name"]} {daily["time"]![i]}：{WeatherText((int)daily["weather_code"]![i]!)}，" +
+            $"氣溫 {daily["temperature_2m_min"]![i]}~{daily["temperature_2m_max"]![i]}°C，" +
+            $"降雨機率 {daily["precipitation_probability_max"]![i]}%";
+}
+```
+
+此方法使用 Description 屬性來標註其用途，在這裡使用了 "查詢指定城市在今天起第幾天的天氣預報" 字串，有了這樣的資訊，AI Agent 就能夠理解這個工具函式的用途，會將當時所提供的提示詞進行理解，決定是否要呼叫哪個方法，並且要傳遞甚麼參數到該方法內，當然，所要傳入進去的引數數值，會再提示詞中進行理解，如此一來，AI Agent 就能夠在需要時呼叫它來取得天氣預報。
+
+同樣地，方法的參數也使用了 Description 屬性來標註其用途，例如 city 參數標註為 "城市的英文名稱，例如 Taipei、Kaohsiung"，daysFromToday 參數標註為 "從今天起算第幾天：0=今天，1=明天，最多 6"。這些描述有助於 AI Agent 理解每個參數的意圖，從而正確地傳遞使用者的需求給工具函式。
+
+在這個方法內，一旦取得了 城市名稱與從今天起第幾天的資訊 (當然，這些資訊將會從提示詞的上下文中解析而來)，就可以進一步透過 geocoding-api.open-meteo.com 所提供的服務來查詢經緯度，當取得了經緯度之後，接著再度透過 api.open-meteo.com 服務來抓取該經緯度的天氣預報資訊，最後將結果組合成文字回傳給 AI Agent。這樣一來，AI Agent 就能夠根據使用者的需求，動態地取得正確的天氣資訊，並將其整合到回應中。
+
+現在回到主程式進入點的 Main 方法內，這個程式將依序對 AI Agent 提出這三個問題："我明天要去台北上班，該穿什麼？", "白色襯衫搭什麼顏色的褲子好看？", "我明天早上在台北、晚上到高雄，要帶哪些衣服？" 現在，在 GetWeatherForecast 方法的 `_toolCallCount++;` 敘述中設定中斷點，這樣在程式執行到呼叫天氣預報的時候，就能夠暫停，方便開發者觀察 AI Agent 的行為以及傳入的參數。
+
+當這個專案執行後，螢幕顯示了 "❓ 我明天要去台北上班，該穿什麼？" ，這個專案將會停在中斷點上，此時的參數為
+city = "Taipei", daysFromToday = 1
+這個方法將會回傳 "台北市 2026-10-28：毛毛雨，氣溫 20.3~24.2°C，降雨機率 45%" 資訊給 AI Agent
+
+接著系統將會進行送入第二個提示詞 "❓ 白色襯衫搭什麼顏色的褲子好看？" 由於這個提示詞內沒有任何地點與天氣的詢問意圖，所以，GetWeatherForecast 方法不會被呼叫，程式將直接由 AI Agent 生成回應。
+
+最後，系統將會送入第三個提示詞 "❓ 我明天早上在台北、晚上到高雄，要帶哪些衣服？" 由於這個提示詞內包含了兩個地點與天氣的詢問意圖，因此，GetWeatherForecast 方法將會被呼叫兩次，分別查詢台北與高雄的天氣預報，方法收到的參數為
+city = "Taipei", daysFromToday = 1
+city = "Kaohsiung", daysFromToday = 1
+
+這個方法將會回傳 "台北市 2026-10-28：毛毛雨，氣溫 20.3~24.2°C，降雨機率 45%" & "高雄市 2026-10-28：陰，氣溫 24.7~28.2°C，降雨機率 2%" 資訊給 AI Agent
+
+現在，AI Agent收到這兩次呼叫的結果後，就能夠根據天氣資訊來生成最適合的穿搭建議。
+
+# 執行結果
+
+現在來看看這個範例程式碼的執行結果。
+
+* 在 Visual Studio 2026 下，按下 F5 鍵執行程式，將會看到程式輸出的結果。
+
+```plaintext
+使用的模型：gpt-5.6-luna
+
+❓ 我明天要去台北上班，該穿什麼？
+🔧 呼叫 GetWeatherForecast(city: Taipei, daysFromToday: 1)
+明天台北約 **20–24°C、毛毛雨，降雨機率 45%**，建議：
+
+- **上身**：長袖襯衫或薄針織衫，外搭防潑水薄外套
+- **下身**：長褲，西裝褲或俐落牛仔褲皆可
+- **鞋子**：防潑水樂福鞋、短靴或運動鞋
+- **必備**：摺傘；早晚可加一件薄外套
+
+整體以「**薄層次＋防雨**」為主，辦公室若冷也方便調整。
+（本題呼叫工具 1 次）
+
+❓ 白色襯衫搭什麼顏色的褲子好看？
+白色襯衫很百搭，推薦這幾種褲色：
+
+- **黑色**：俐落正式，適合上班或正式場合
+- **深藍／丹寧藍**：經典耐看，休閒又有精神
+- **卡其／米色**：溫柔清爽，適合日常穿搭
+- **灰色**：簡約成熟，整體很有質感
+- **咖啡／駝色**：增加秋冬氛圍與層次
+- **白色／奶油色**：同色系穿搭，乾淨時髦；建議材質或深淺有區別
+
+想要最不出錯：**白襯衫＋深藍牛仔褲**。
+想要顯正式：**白襯衫＋黑色西裝褲**。
+（本題呼叫工具 0 次）
+
+❓ 我明天早上在台北、晚上到高雄，要帶哪些衣服？
+🔧 呼叫 GetWeatherForecast(city: Taipei, daysFromToday: 1)
+🔧 呼叫 GetWeatherForecast(city: Kaohsiung, daysFromToday: 1)
+明天台北 **20–24°C、毛毛雨**，晚上高雄 **25–28°C、陰天**，建議帶：
+
+- **短袖上衣** 1–2 件
+- **薄長袖或輕薄外套** 1 件：早上台北較涼，晚間高雄可脫掉
+- **長褲** 1 件；怕熱可另帶薄裙／短褲
+- **摺傘或防潑水外套**：台北有毛毛雨
+- **防滑、好走的鞋子**，避免麂皮或布鞋
+
+穿搭可選「短袖＋薄外套＋長褲」，抵達高雄後脫外套即可。
+（本題呼叫工具 2 次）
+```
+
+
